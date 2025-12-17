@@ -1184,6 +1184,10 @@ function waitForSecrets() {
   state.secret = "";
   state.target = "";
   state.guessCount = 0;
+
+  // Ensure we mark ourselves active whenever we reach the secret setup
+  markActive();
+
   const ref = db.ref(`games/${state.code}`);
   ref.on("value", function secretListener(snap) {
     const g = snap.val();
@@ -1206,7 +1210,8 @@ function submitSecret() {
     document.getElementById("secretInput").disabled = true;
     document.getElementById("secretSub").innerText = "Locked! Waiting for partner...";
     state.secret = val;
-    db.ref(`games/${state.code}/${state.role}/secret`).set(val);
+    // Clear any disconnected flag to signal we are active
+    db.ref(`games/${state.code}/${state.role}`).update({ secret: val, disconnectedAt: null, expiresAt: null, clientId: state.clientId });
   }
 }
 
@@ -1512,6 +1517,10 @@ function submitGuess() {
     db.ref(`games/${state.code}`).once("value").then(snap => {
       if(snap.val().turn !== state.role) return showToast("Wait for your turn!");
       stopTurnTimer();
+
+      // mark us active (clear disconnected flag) since we're making a move
+      db.ref(`games/${state.code}/${state.role}`).update({ disconnectedAt: null, expiresAt: null, clientId: state.clientId }).catch(() => {});
+
       let currentGuessCount = snap.val().guessCount || 0;
       currentGuessCount++;
       db.ref(`games/${state.code}/guessCount`).set(currentGuessCount); 
@@ -1519,6 +1528,9 @@ function submitGuess() {
       db.ref(`games/${state.code}/moves`).push({ 
         user: state.name, guess: guess, p: fb.p, n: fb.n, id: currentGuessCount 
       });
+      // receive a move is a sign of opponent activity — stop any disconnect countdown
+      stopOpponentDisconnectCountdown();
+
       if(fb.p === state.digits) {
         db.ref(`games/${state.code}/winner`).set(state.role);
       } else {
@@ -1556,6 +1568,8 @@ function listenMultiplayerGame() {
   ref.child('moves').on('child_added', snap => {
     const m = snap.val();
     addHistoryRow(m.guess, m.p, m.n, m.user, m.id); 
+    // receiving a move means opponent is active — clear disconnect countdown if any
+    stopOpponentDisconnectCountdown();
   });
   ref.on('value', function gameValueListener(snap) {
     const g = snap.val();
@@ -1637,6 +1651,8 @@ function listenMultiplayerGame() {
     box.scrollTop = box.scrollHeight;
     // Play chat notification sound for every incoming message
     playChatNotificationEffect();
+    // Chat activity indicates opponent presence — clear disconnect countdown
+    stopOpponentDisconnectCountdown();
   });
   ref.child('actions').on('child_added', snap => {
     if(snap.val().sender !== state.role) blastHearts(false);
@@ -1748,6 +1764,17 @@ function updateDebugDisplay() {
   s.innerText = server;
   n.innerText = now;
   r.innerText = rem;
+}
+
+// Mark this client as active in the game slot (clear any disconnected flags)
+function markActive() {
+  if (state.mode === 'cpu' || !state.code || !state.role) return;
+  const slotRef = db.ref(`games/${state.code}/${state.role}`);
+  slotRef.update({ disconnectedAt: null, expiresAt: null, clientId: state.clientId, name: state.name }).catch(() => {});
+  try {
+    const expiry = Date.now() + 5*60*1000;
+    slotRef.onDisconnect().update({ disconnectedAt: firebase.database.ServerValue.TIMESTAMP, expiresAt: expiry });
+  } catch(e) { console.warn('onDisconnect re-registration failed', e); }
 }
 
 function endGame(win, reason = '') {
