@@ -584,6 +584,8 @@ body.theme-sunset .card {
 
       <span id="turnIndicator" style="font-size:16px; font-weight:bold; color:var(--p); text-align: right;">Your Turn</span>
     </div>
+    <!-- Small in-game disconnect banner -->
+    <div id="disconnectBanner" style="font-size:13px; color:#e85a5a; display:none; text-align:center; margin-bottom:8px;"></div>
 
   <div id="debugPanel" class="hidden">
     <div>Server turnStart: <span id="dbgServer">--</span></div>
@@ -772,10 +774,29 @@ function showExitConfirm() {
 function confirmExit(shouldExit) {
     document.getElementById('exitConfirmModal').classList.add('hidden');
     if (shouldExit) {
-        state.gameActive = false; 
-        clearInterval(state.timerIntervalId);
-        localStorage.removeItem(`streak_${state.code}`); 
-        location.reload(); 
+        // If in multiplayer and both players are connected, set the other player as winner immediately
+        if (state.mode !== 'cpu' && state.code) {
+            const other = state.role === 'p1' ? 'p2' : 'p1';
+            db.ref(`games/${state.code}`).once('value').then(snap => {
+                const g = snap.val();
+                if (g && g.p1 && g.p2) {
+                    // award win to the staying player
+                    db.ref(`games/${state.code}/winner`).set(`${other}_opponent_left`).finally(() => {
+                        state.gameActive = false; clearInterval(state.timerIntervalId); localStorage.removeItem(`streak_${state.code}`); location.reload();
+                    });
+                } else {
+                    state.gameActive = false; clearInterval(state.timerIntervalId); localStorage.removeItem(`streak_${state.code}`); location.reload();
+                }
+            }).catch(err => {
+                console.error('Error while setting exit winner:', err);
+                state.gameActive = false; clearInterval(state.timerIntervalId); localStorage.removeItem(`streak_${state.code}`); location.reload();
+            });
+        } else {
+            state.gameActive = false; 
+            clearInterval(state.timerIntervalId);
+            localStorage.removeItem(`streak_${state.code}`); 
+            location.reload(); 
+        }
     } else {
         show('game');
     }
@@ -988,9 +1009,14 @@ function createRoom() {
     .then(() => {
       const p1Ref = gameRef.child('p1');
       // Write p1 with clientId so we can track which client owns it
-      return p1Ref.set({ name: state.name, clientId: state.clientId }).then(() => {
-        // ensure this entry is removed if this client disconnects
-        p1Ref.onDisconnect().remove();
+      return p1Ref.set({ name: state.name, clientId: state.clientId, disconnectedAt: null, expiresAt: null }).then(() => {
+        // Instead of removing the node immediately on disconnect, mark disconnected time and set a short expiry
+        const expiry = Date.now() + 5*60*1000; // 5 minutes from now (client time)
+        try {
+          p1Ref.onDisconnect().update({ disconnectedAt: firebase.database.ServerValue.TIMESTAMP, expiresAt: expiry });
+        } catch(e) {
+          console.warn('onDisconnect registration failed', e);
+        }
         document.getElementById('roomInfoDisplay').classList.remove('hidden');
         document.getElementById('roomCodeDisplay').innerHTML = `Code: <b>${state.code}</b>`;
         updateRoomStatus(false);
@@ -1004,7 +1030,10 @@ function createRoom() {
 
 function joinRoom() {
   state.role = "p2";
-  state.code = document.getElementById("joinCodeInput").value.trim().toUpperCase();
+  // sanitize pasted/joined code to avoid invisible chars causing mismatches
+  let raw = document.getElementById("joinCodeInput").value || "";
+  raw = raw.normalize ? raw.normalize('NFKC') : raw;
+  state.code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   if (!state.code) return showToast("Enter Code!");
 
   const gameRef = db.ref(`games/${state.code}`);
@@ -1013,52 +1042,100 @@ function joinRoom() {
 
   // First check game exists (gives faster feedback if invalid code)
   gameRef.once('value').then(snap => {
-    if (!snap.exists()) return showToast('Invalid Code');
-
-    // Attempt to atomically claim p2
-    p2Ref.transaction(current => {
-      if (current === null) {
-        return { name: state.name, clientId: state.clientId };
+    if (!snap.exists()) {
+      // Room not found — try a lowercase fallback (handles variations in keys)
+      const alt = state.code.toLowerCase();
+      if (alt && alt !== state.code) {
+        db.ref(`games/${alt}`).once('value').then(altSnap => {
+          if (altSnap.exists()) {
+            state.code = alt; // switch to existing key
+            // proceed with claiming p2
+            const p2RefAlt = db.ref(`games/${state.code}/p2`);
+            attemptClaim(p2RefAlt, db.ref(`games/${state.code}`));
+          } else {
+            showErrorModal();
+          }
+        }).catch(err => { console.error('Fallback read failed', err); showErrorModal(); });
+      } else {
+        showErrorModal();
       }
-      // If already occupied, abort the transaction
       return;
-    }, (error, committed, snapshot) => {
-      if (error) {
-        console.error('Transaction failed:', error);
-        showToast('Failed to join room. Try again.');
+    }
+
+    // Check if the room has expired (creator was gone for >5min) — if so, treat as not found
+    const gameObj = snap.val();
+    if (gameObj && gameObj.p1 && gameObj.p1.expiresAt && gameObj.p1.disconnectedAt && gameObj.p1.expiresAt < Date.now()) {
+      // room expired
+      showErrorModal();
+      return;
+    }
+
+    // If p2 exists and was recently disconnected, allow the SAME player (name match) to reclaim, else prevent others for 60s
+    if (gameObj && gameObj.p2 && gameObj.p2.disconnectedAt) {
+      const elapsed = Date.now() - gameObj.p2.disconnectedAt;
+      if (elapsed < 60000) {
+        // If the current joiner has the same name as the disconnected slot, treat it as a rejoin
+        if (gameObj.p2.name === state.name) {
+          // Reclaim by overwriting the slot
+          attemptClaim(p2Ref, gameRef);
+          return;
+        }
+        const wait = Math.ceil((60000 - elapsed) / 1000);
+        showToast(`Player recently disconnected. Please wait ${wait}s for them to rejoin.`, 4000);
         return;
       }
-      if (!committed) {
-        // someone already took the slot
-        showToast('Room is already full or someone joined just now.');
+    }
+
+    // Helper: attempt to claim the p2 slot for a given refs (used by fallback too)
+    function attemptClaim(slotRef, theGameRef) {
+      slotRef.transaction(current => {
+        if (current === null) {
+          return { name: state.name, clientId: state.clientId, disconnectedAt: null, expiresAt: null };
+        }
+        // If already occupied, abort the transaction
         return;
-      }
+      }, (error, committed, snapshot) => {
+        if (error) {
+          console.error('Transaction failed:', error);
+          showToast('Failed to join room. Try again.');
+          return;
+        }
+        if (!committed) {
+          // someone already took the slot
+          showToast('Room is already full or someone joined just now.');
+          return;
+        }
 
-      // Successfully claimed p2 — set onDisconnect to remove our claim
-      try {
-        p2Ref.onDisconnect().remove();
-      } catch (e) {
-        console.warn('onDisconnect registration failed', e);
-      }
+        // Successfully claimed p2 — set onDisconnect to mark disconnectedAt and set expiry
+        try {
+          const expiry = Date.now() + 5*60*1000; // 5 minutes
+          slotRef.onDisconnect().update({ disconnectedAt: firebase.database.ServerValue.TIMESTAMP, expiresAt: expiry });
+        } catch (e) {
+          console.warn('onDisconnect registration failed', e);
+        }
 
-      // Read settings and proceed
-      gameRef.once('value').then(gameSnap => {
-        const settings = gameSnap.val().settings || {};
-        state.digits = settings.digits || state.digits;
-        state.repeat = settings.repeat || state.repeat;
-        state.timeoutEnabled = settings.timeout || false;
-        state.timeoutDuration = settings.duration || 0;
-        state.opponentName = gameSnap.val().p1?.name || 'Player 1';
+        // Read settings and proceed
+        theGameRef.once('value').then(gameSnap => {
+          const settings = gameSnap.val().settings || {};
+          state.digits = settings.digits || state.digits;
+          state.repeat = settings.repeat || state.repeat;
+          state.timeoutEnabled = settings.timeout || false;
+          state.timeoutDuration = settings.duration || 0;
+          state.opponentName = gameSnap.val().p1?.name || 'Player 1';
 
-        show('secret');
-        document.getElementById('secretTitle').innerText = 'Set Secret';
-        document.getElementById('secretSub').innerText = `Connected to ${state.opponentName}`;
-        waitForSecrets();
-      }).catch(err => {
-        console.error('Error reading game settings after join:', err);
-        showToast('Joined but failed to read game settings.');
+          show('secret');
+          document.getElementById('secretTitle').innerText = 'Set Secret';
+          document.getElementById('secretSub').innerText = `Connected to ${state.opponentName}`;
+          waitForSecrets();
+        }).catch(err => {
+          console.error('Error reading game settings after join:', err);
+          showToast('Joined but failed to read game settings.');
+        });
       });
-    });
+    }
+
+    // Proceed to claim against the current refs
+    attemptClaim(p2Ref, gameRef);
   }).catch(err => {
     console.error('Firebase Join Error (existence check):', err);
     showToast('Error connecting to room. Check your network.');
@@ -1511,6 +1588,23 @@ function listenMultiplayerGame() {
     } else if (state.timeoutEnabled && myTurn && !g.turnStart) {
          db.ref(`games/${state.code}/turnStart`).set(firebase.database.ServerValue.TIMESTAMP);
     }
+
+    // Opponent disconnect handling: if opponent has a disconnectedAt timestamp, start a 60s countdown
+    const oppRole = state.role === 'p1' ? 'p2' : 'p1';
+    const opponent = g[oppRole];
+    if (opponent && opponent.disconnectedAt) {
+      const elapsed = Date.now() - opponent.disconnectedAt;
+      if (elapsed < 60000) {
+        const remaining = Math.ceil((60000 - elapsed) / 1000);
+        startOpponentDisconnectCountdown(remaining);
+      } else {
+        // opponent did not return within grace period — end game and award win to staying player
+        if (!g.winner) db.ref(`games/${state.code}/winner`).set(`${state.role}_opponent_left`);
+      }
+    } else {
+      // opponent is connected or absent but not flagged as disconnected
+      stopOpponentDisconnectCountdown();
+    }
   });
   ref.child('chat').on('child_added', snap => {
     const c = snap.val();
@@ -1539,7 +1633,61 @@ function showToast(msg, secs = 3000) {
   }
   t.innerText = msg;
   t.style.display = 'block';
-  setTimeout(() => { t.style.display = 'none'; }, secs);
+  // If secs is 0 or negative, keep persistent until explicitly cleared
+  if (secs > 0) {
+    setTimeout(() => { t.style.display = 'none'; }, secs);
+  }
+}
+
+function clearToast() {
+  const t = document.getElementById('toast');
+  if (t) t.style.display = 'none';
+}
+
+// Handle opponent disconnect countdown: show persistent message and countdown for 60 seconds
+state.disconnect = { intervalId: null, remaining: 0 };
+function startOpponentDisconnectCountdown(remainingSeconds) {
+  // Clear any existing countdown
+  stopOpponentDisconnectCountdown();
+  state.disconnect.remaining = Math.max(0, remainingSeconds || 60);
+  // Update small UI text in setup/game if present and show in-game banner
+  const waitText = document.getElementById('waitText');
+  const banner = document.getElementById('disconnectBanner');
+  if (waitText) waitText.innerText = `Opponent disconnected — waiting ${state.disconnect.remaining}s...`;
+  if (banner) { banner.style.display = 'block'; banner.innerText = `Opponent disconnected — waiting ${state.disconnect.remaining}s...`; }
+  showToast(`Opponent disconnected — waiting ${state.disconnect.remaining}s...`, 0);
+  state.disconnect.intervalId = setInterval(() => {
+    state.disconnect.remaining -= 1;
+    if (state.disconnect.remaining > 0) {
+      if (waitText) waitText.innerText = `Opponent disconnected — waiting ${state.disconnect.remaining}s...`;
+      if (banner) banner.innerText = `Opponent disconnected — waiting ${state.disconnect.remaining}s...`;
+      showToast(`Opponent disconnected — waiting ${state.disconnect.remaining}s...`, 0);
+    } else {
+      // clear UI and timer
+      if (waitText) waitText.innerText = 'Opponent did not return.';
+      if (banner) { banner.style.display = 'none'; banner.innerText = ''; }
+      stopOpponentDisconnectCountdown();
+      // If still disconnected when timer expires, declare winner for staying player
+      if (state.mode !== 'cpu' && state.code) {
+        try {
+          db.ref(`games/${state.code}/winner`).set(`${state.role}_opponent_left`);
+        } catch(e) { console.error('Failed to set winner on disconnect timeout', e); }
+      }
+    }
+  }, 1000);
+}
+
+function stopOpponentDisconnectCountdown() {
+  if (state.disconnect.intervalId) {
+    clearInterval(state.disconnect.intervalId);
+    state.disconnect.intervalId = null;
+    state.disconnect.remaining = 0;
+    const waitText = document.getElementById('waitText');
+    if (waitText) waitText.innerText = (state.mode === 'cpu') ? '' : 'Waiting for partner...';
+    const banner = document.getElementById('disconnectBanner'); if (banner) { banner.style.display = 'none'; banner.innerText = ''; }
+    clearToast();
+    showToast('Opponent rejoined!', 2000);
+  }
 }
 
 // --- In-UI Confirm Modal API ---
@@ -1581,6 +1729,8 @@ function updateDebugDisplay() {
 }
 
 function endGame(win, reason = '') {
+  // Ensure any pending disconnect countdown is cleared
+  stopOpponentDisconnectCountdown();
   show('win');
   state.gameActive = false; blastHearts(); stopTurnTimer(); 
   const winTitleEl = document.getElementById("winTitle");
