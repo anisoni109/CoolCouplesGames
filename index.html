@@ -1,0 +1,1740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title> Guess the Number 😁</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+<style>
+/* --- THEME & BASE STYLES --- */
+:root { --p: #ff5c7a; --s: #3cc3c9; --bg: linear-gradient(135deg,#fff0f3,#e0f7fa); }
+
+/* Card and text variables for theming */
+:root { --card-bg: #ffffff; --text-color: #222; }
+
+/* MOBILE HEIGHT FIX: Ensure root elements take full height */
+html, body {
+  height: 100%; 
+}
+
+body {
+  margin: 0; 
+  font-family: 'Segoe UI', system-ui, sans-serif; 
+  background: var(--bg); 
+  color: var(--text-color);
+  display: flex; 
+  flex-direction: column;
+  overflow: hidden; 
+  user-select: none;
+}
+
+/* --- HEADER FIX (Clipped Buttons) --- */
+header {
+  background: linear-gradient(90deg, var(--p), var(--s)); 
+  background-size: 200% 200%;
+  animation: headerGradientShift 12s ease-in-out infinite;
+  color:white; 
+  padding: 15px 10px;
+  font-weight:700; display:flex; justify-content:space-between; align-items:center; 
+  box-shadow:0 2px 10px rgba(0,0,0,0.1);
+  min-height: 55px; 
+  box-sizing: border-box; 
+  font-size: 18px;
+  flex-shrink: 0; 
+}
+.music-btn, .help-btn {
+  background:none; border:none; color:white; font-size:18px; cursor:pointer; 
+  padding: 10px; 
+  line-height: 1; 
+  height: 40px; 
+  width: 40px; 
+  display: flex; 
+  align-items: center;
+  justify-content: center;
+  margin: 0 5px; 
+}
+header span {
+  /* CRITICAL FIX: Ensure game title doesn't force buttons off-screen */
+  flex-shrink: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0 10px;
+}
+.header-actions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+@keyframes headerGradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+
+/* --- GENERAL LAYOUT & COMPONENTS --- */
+.container {
+  flex-grow: 1; 
+  overflow-y: auto; 
+  padding:15px; 
+  box-sizing:border-box; 
+  padding-bottom: 30px;
+}
+.card {max-width:400px; margin:0 auto 15px; background:var(--card-bg, white); border-radius:18px; padding:20px; box-shadow:0 4px 20px rgba(0,0,0,.08); position: relative;}
+.hidden {display:none !important;}
+.modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.5); z-index: 9990;
+    display: flex; justify-content: center; align-items: center;
+}
+.modal-content {
+    background: white; border-radius: 18px; padding: 25px;
+    max-width: 90%; width: 350px; text-align: center;
+    box-shadow: 0 5px 30px rgba(0, 0, 0, 0.2);
+}
+
+
+/* Inputs & Buttons */
+input, select {width:100%; padding:14px; margin:8px 0; border:2px solid #eee; border-radius:12px; font-size:18px; box-sizing:border-box; outline:none; transition:0.3s;}
+input:focus {border-color:var(--p);}
+button {width:100%; border:none; padding:12px; margin:6px 0; border-radius:12px; font-weight:700; font-size:16px; cursor:pointer; transition:transform 0.1s;}
+button:active {transform:scale(0.96);}
+.primary {background:var(--p); color:white;}
+.secondary {background:var(--s); color:white;}
+.light {background:#f4f4f4; color:#666;}
+.danger {background:#ff4d4d; color:white;}
+.btn-grid {display:grid; grid-template-columns: 1fr 1fr; gap:10px;}
+
+/* Game History */
+.scroll-box {max-height:250px; overflow-y:auto; border:1px solid #eee; border-radius:12px; margin:10px 0; background:#fafafa;}
+table {width:100%; border-collapse: collapse; font-size:16px;}
+th {position:sticky; top:0; background:#eee; z-index:2; font-size:14px; text-transform:uppercase; color:#555;}
+th, td {padding:10px 6px; text-align:center; border-bottom:1px solid #ddd;}
+.active-tab {background: var(--p); color: white;}
+.inactive-tab {background: #f4f4f4; color: #666;}
+.tab-content {border: 1px solid #eee; border-radius: 0 0 12px 12px;}
+.tab-button-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block; /* Important for ellipsis to work */
+}
+
+/* --- TIMER STYLES --- */
+#gameHeaderBar {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+    margin-bottom: 15px;
+}
+#timerDisplay {
+    width: 55px; /* Reduced width */
+    padding: 5px 0; /* Reduced padding */
+    font-size: 14px; /* Reduced font size */
+    font-weight: bold;
+    color: var(--s);
+    background: #fff;
+    border: 2px solid var(--s);
+    border-radius: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    flex-shrink: 0;
+}
+#timerSeconds {
+    margin-left: 3px;
+    transition: all 0.2s; 
+}
+.timer-fast-pulse {
+    color: #ff4d4d !important;
+    border-color: #ff4d4d !important;
+    animation: heartbeat 0.5s infinite alternate;
+}
+.timer-medium-pulse {
+    color: #ff8e8e !important;
+    border-color: #ff8e8e !important;
+    animation: heartbeat 0.7s infinite alternate;
+}
+
+@keyframes heartbeat {
+    0% { transform: scale(1.0); }
+    100% { transform: scale(1.05); }
+}
+
+/* Turn indicator blink on chance change */
+.turn-blink {
+    animation: turnBlink 0.6s ease-out 2;
+}
+@keyframes turnBlink {
+    0% { transform: scale(1); opacity: 1; }
+    30% { transform: scale(1.1); opacity: 0.4; }
+    60% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(1.05); opacity: 1; }
+}
+
+
+/* --- SETUP STYLES --- */
+#roomStatus {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 10px;
+    margin-left: 10px;
+    border-radius: 10px;
+    font-weight: bold;
+    font-size: 14px;
+}
+.status-waiting {
+    background: #fff3cd;
+    color: #856404;
+}
+.status-ready {
+    background: #d4edda;
+    color: #155724;
+}
+/* Reduced Copy Button Size */
+.copy-btn {
+    width: auto;
+    padding: 10px 10px; 
+    margin: 0;
+    font-size: 12px; /* Reduced font size */
+    background: #3cc3c9;
+    color: white;
+    border-radius: 12px;
+    flex-shrink: 0;
+    height: 38px; /* Adjusted height */
+    line-height: 1;
+}
+
+
+/* --- WIN STREAK STYLES --- */
+#streakDisplay {
+    margin: 15px 0;
+    padding: 10px;
+    background: #f0f0ff;
+    border-radius: 10px;
+    font-weight: bold;
+    color: #5d5d81;
+    font-size: 18px;
+}
+
+
+/* --- SECRET DISPLAY --- */
+#mySecretDisplay {
+  background: #f4f4f4;
+  padding: 10px;
+  border-radius: 12px;
+  margin-bottom: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+#secretNumber {
+  font-size: 24px;
+  font-weight: bold;
+  letter-spacing: 5px;
+  color: #333;
+}
+#secretToggleBtn {
+  width: auto;
+  padding: 5px 10px;
+  margin: 0;
+  font-size: 12px;
+  background: #ccc;
+  color: #333;
+}
+
+
+/* --- CHAT UI REDESIGN --- */
+.chat-container {
+  margin-top: 15px;
+}
+.chat-box {
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+.chat-msg {
+  font-size: 14px;
+  padding: 3px 0;
+}
+.chat-msg.me .chat-user {
+  color: #007bff; /* bright blue */
+}
+.chat-msg.them .chat-user {
+  color: #e91e63; /* strong pink */
+}
+.chat-input-row {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.chat-input-row input {
+  flex-grow: 1;
+  margin: 0;
+  padding: 10px;
+}
+.chat-btn-group {
+    display: flex;
+    gap: 5px;
+    flex-shrink: 0;
+}
+.chat-btn-group button {
+    width: 40px;
+    padding: 10px 5px;
+    margin: 0;
+    font-size: 16px;
+    line-height: 1;
+    border-radius: 12px;
+}
+
+
+/* Digit Tracker Styles (Optimized for space) */
+#scratchpadContent {
+  overflow: hidden; 
+  margin-top: 5px;
+  padding-top: 10px;
+  border-top: 1px dashed #eee;
+}
+.digit-tracker {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px; 
+  margin-bottom: 10px; 
+}
+.digit-btn {
+  width: 100%;
+  padding: 8px 0; 
+  margin: 0; 
+  border-radius: 8px;
+  background: #fff;
+  color: #333;
+  border: 1px solid var(--p); 
+  font-size: 16px; 
+  font-weight: bold;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.digit-btn.excluded {
+  background: #ffeded;
+  color: #ff4d4d;
+  border-color: #ff8e8e;
+}
+.digit-btn.excluded::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 5%;
+  right: 5%;
+  height: 2px; 
+  background: #ff4d4d;
+  transform: translateY(-50%) rotate(-5deg);
+  border-radius: 1px;
+}
+
+/* Blended start button for setup */
+.start-blend { background: linear-gradient(90deg,#ff7b98,#ff5c7a); box-shadow: 0 6px 18px rgba(255,92,122,0.18); color: white; }
+
+/* Toast for in-game messages */
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; background: rgba(0,0,0,0.8); color: white; padding: 10px 14px; border-radius: 12px; z-index: 9999; font-size:14px; display:none; }
+
+/* Debug panel */
+#debugPanel { font-size:12px; color:#666; margin-top:8px; background: rgba(0,0,0,0.03); padding:8px; border-radius:8px; }
+
+/* Animations */
+.heart {position:fixed; color:var(--p); font-size:24px; animation:floatUp 4s linear forwards; pointer-events:none; z-index:999;}
+@keyframes floatUp {0%{opacity:1; transform:translateY(0) scale(1);} 100%{opacity:0; transform:translateY(-100vh) scale(1.5);}}
+.footer-text {text-align:center; font-size:12px; color:#aaa; margin-top:20px; font-style:italic;}
+
+/* Theme-based subtle animations */
+button.primary {
+  position: relative;
+  overflow: hidden;
+}
+button.primary::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -150%;
+  width: 150%;
+  height: 100%;
+  background: linear-gradient(120deg, rgba(255,255,255,0.2), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+button.primary:hover::after {
+  opacity: 1;
+  animation: buttonShine 0.8s forwards;
+}
+@keyframes buttonShine {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(100%); }
+}
+
+body.theme-ocean .card,
+body.theme-sunset .card {
+  animation: cardFloat 4s ease-in-out infinite alternate;
+}
+@keyframes cardFloat {
+  0% { transform: translateY(0px); box-shadow:0 4px 20px rgba(0,0,0,.08); }
+  100% { transform: translateY(-3px); box-shadow:0 8px 25px rgba(0,0,0,.12); }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <button class="music-btn" onclick="show('statsView')"><i class="fas fa-chart-bar"></i></button>
+  <span>💕 Games for Couples</span>
+  <div class="header-actions">
+    <button class="help-btn" onclick="show('themeView')"><i class="fas fa-palette"></i></button>
+    <button class="help-btn" onclick="show('helpView')"><i class="fas fa-question-circle"></i></button>
+    <button class="music-btn" onclick="toggleMusic()"><i id="musicIcon" class="fas fa-volume-mute"></i></button>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="card" id="home">
+    <div style="text-align:center; margin-bottom:20px;">
+  <h1 style="margin:0; color:#ff5c7a; font-size:24px;">Guess the Number 😁</h1>
+  <p style="margin:6px 0; color:#888; font-size:14px;">Guess the secret number — fast and fair.</p>
+    </div>
+    <input id="nameInput" placeholder="Enter your nickname">
+    <button class="primary" onclick="setupGame('cpu')"><i class="fas fa-robot"></i> Practice vs CPU</button>
+    <div class="btn-grid">
+      <button class="secondary" onclick="setupGame('create')"><i class="fas fa-plus"></i> Create Room</button>
+      <button class="secondary" onclick="setupGame('join')"><i class="fas fa-sign-in-alt"></i> Join Room</button>
+    </div>
+    <div class="footer-text">Made with ❤️ by Ankit for Riya</div>
+  </div>
+<div class="modal-overlay hidden" id="errorModal">
+    <div class="modal-content">
+        <h3 style="color: var(--p); margin-top: 0;">Room Not Found! 🔍</h3>
+        <p style="color: #666;">We couldn't find a game with that code. Please check with your partner and try again.</p>
+        <button class="primary" onclick="closeErrorModal()">Retype Code</button>
+    </div>
+</div>
+  <div class="modal-overlay hidden" id="exitConfirmModal">
+      <div class="modal-content">
+          <h3 style="color: var(--p); margin-top: 0;">Quit Game?</h3>
+          <p style="color: #666;">Are you sure you want to exit? You will lose progress in this match.</p>
+          <div class="btn-grid">
+              <button class="light" onclick="show('game')">Resume Game</button>
+              <button class="danger" onclick="confirmExit(true)">Quit</button>
+          </div>
+      </div>
+  </div>
+
+  <!-- Generic confirm modal (used instead of browser confirm()) -->
+  <div class="modal-overlay hidden" id="confirmModal">
+    <div class="modal-content">
+      <h3 id="confirmTitle" style="color:var(--p); margin-top:0;">Confirm</h3>
+      <p id="confirmMessage" style="color:#666; margin-bottom:18px;">Are you sure?</p>
+      <div class="btn-grid">
+        <button class="light" onclick="confirmCancel()" style="width:auto;">Cancel</button>
+        <button class="danger" onclick="confirmOk()" style="width:auto;">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card hidden" id="helpView">
+    <button class="light" onclick="show(state.gameActive ? 'game' : 'home')" style="width:auto; font-size:12px; margin-bottom:15px;">
+        ← Close Help
+    </button>
+  <h2 style="text-align:center; color:var(--p); margin-bottom:10px;">Game Rules</h2>
+    
+    <div style="font-size:16px; margin-top:15px; padding:15px; border-radius:12px; background:#fff0f3; color:#555; border: 1px solid var(--p);">
+        <p style="margin:0; font-weight:bold; color:var(--p); font-size: 18px;">Feedback Meaning (Custom):</p>
+        <ul style="margin:10px 0 0 15px; padding:0; list-style:disc;">
+            <li>**Pos (Correct Positions):** This is the number of digits in your guess that are **correct** and in the **exact right position** (like "Bulls" in Mastermind).</li>
+            <li>**Num (Total Correct Digits):** This is the **TOTAL number** of unique digits in your guess that are present anywhere in the secret number.</li>
+        </ul>
+        <p style="margin-top:15px; font-size:14px; color:#888;">*A winning guess will show: Pos = [Total Digits] and Num = [Total Digits].</p>
+    </div>
+
+    <h4 style="margin:15px 0 5px 0; color:var(--s);">Settings:</h4>
+    <p style="font-size:14px;">The game requires guessing a secret number of a set number of digits (e.g., 4). Repetition can be turned **ON** or **OFF** (requiring unique digits).</p>
+  </div>
+  
+  <div class="card hidden" id="statsView">
+    <button class="light" onclick="show(state.gameActive ? 'game' : 'home')">← Back</button>
+  <h2 style="text-align:center; color:var(--s); margin-bottom:10px;">Statistics</h2>
+    
+    <h4 style="margin:10px 0; color:var(--p);">Vs Computer</h4>
+    <div class="stats-box">
+      <div class="leaderboard-row"><span>Wins</span> <span class="badge" id="s_cpu_w">0</span></div>
+      <div class="leaderboard-row"><span>Losses</span> <span class="badge" id="s_cpu_l" style="background:#888">0</span></div>
+    </div>
+
+    <h4 style="margin:10px 0; color:var(--s);">1v1 Champions</h4>
+    <div class="stats-box" id="pvpLeaderboard">
+      <div style="text-align:center; color:#999; font-size:13px;">No records yet</div>
+    </div>
+    
+    <button class="danger" style="margin-top:20px; font-size:12px;" onclick="resetStats()"><i class="fas fa-trash"></i> Clear All Stats</button>
+  </div>
+
+  <div class="card hidden" id="themeView">
+    <button class="light" onclick="show(state.gameActive ? 'game' : 'home')" style="width:auto; font-size:12px; margin-bottom:10px;">
+        ← Back
+    </button>
+    <h2 style="text-align:center; color:var(--p); margin-bottom:10px;">Choose Theme</h2>
+    <p style="font-size:13px; color:#666; text-align:center; margin-top:0; margin-bottom:15px;">
+      Tap a theme to instantly change the look of the game.
+    </p>
+    <div class="btn-grid">
+      <button class="light" onclick="setTheme('love')" style="background:linear-gradient(135deg,#ff7b98,#ff5c7a); color:white; border:none;">Love</button>
+      <button class="light" onclick="setTheme('calm')" style="background:linear-gradient(135deg,#3cc3c9,#6fb3b8); color:white; border:none;">Calm</button>
+      <button class="light" onclick="setTheme('sunset')" style="background:linear-gradient(135deg,#ff7e5f,#ffd1a0); color:#3b1d1a; border:none;">Sunset</button>
+      <button class="light" onclick="setTheme('forest')" style="background:linear-gradient(135deg,#2e7d32,#b2ffb0); color:#0b2410; border:none;">Forest</button>
+      <button class="light" onclick="setTheme('ocean')" style="background:linear-gradient(135deg,#0072ff,#a5e9ff); color:#031927; border:none;">Ocean</button>
+      <button class="light" onclick="setTheme('aurora')" style="background:linear-gradient(135deg,#4b6cb7,#182848); color:#e0f7fa; border:none;">Aurora</button>
+      <button class="light" onclick="setTheme('candy')" style="background:linear-gradient(135deg,#ff9a9e,#fecfef); color:#4a0b2b; border:none;">Candy</button>
+      <button class="light" onclick="setTheme('neon')" style="background:linear-gradient(135deg,#00f260,#0575e6); color:#001b2e; border:none;">Neon</button>
+      <button class="light" onclick="setTheme('midnight')" style="background:linear-gradient(135deg,#141e30,#243b55); color:#e3f2fd; border:none;">Midnight</button>
+      <button class="light" onclick="setTheme('dark')" style="background:linear-gradient(135deg,#0f1115,#15181c); color:#ff8aa3; border:none;">Dark</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="setup">
+    <button class="light" onclick="show('home')" style="width:auto; font-size:12px;">← Back</button>
+    <h3>Settings</h3>
+    <div class="btn-grid">
+      <div>
+        <label style="font-size:12px;">Digits</label>
+        <select id="digitsSelect"><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option></select>
+      </div>
+      <div>
+        <label style="font-size:12px;">Repeat</label>
+        <select id="repeatSelect"><option value="no">No</option><option value="yes">Yes</option></select>
+      </div>
+    </div>
+    
+    <div id="createUI" class="hidden" style="margin-top:10px; border-top: 1px solid #eee; padding-top: 10px;">
+        <p style="font-size:12px; color:#777; margin:0 0 5px 0;">Share the code with your partner after creating the room.</p>
+    </div>
+
+    <div id="joinUI" class="hidden">
+      <input id="joinCodeInput" placeholder="Enter Room Code" style="text-align:center; letter-spacing:2px; font-weight:bold;">
+    </div>
+
+    <!-- Shared timeout settings for both CPU and 1v1 modes -->
+    <div style="margin-top:10px; border-top: 1px solid #eee; padding-top: 10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label for="timeoutEnable" style="font-weight:600;">Timeout</label>
+            <input type="checkbox" id="timeoutEnable" style="width: auto; margin: 0; padding: 0;">
+        </div>
+        <div id="timeoutDurationDiv" class="hidden">
+             <label style="font-size:12px; margin-top:10px; display:block;">Duration (seconds)</label>
+             <select id="timeoutDuration">
+                <option value="15">15 s</option>
+                <option value="30">30 s</option>
+                <option value="45">45 s</option>
+                <option value="60" selected>60 s</option>
+                <option value="75">75 s</option>
+                <option value="90">90 s</option>
+                <option value="105">105 s</option>
+                <option value="120">120 s</option>
+            </select>
+        </div>
+    </div>
+  <button class="primary start-blend" style="margin-top:15px;" onclick="proceedToGame()">Start Game</button>
+    
+    <div id="roomInfoDisplay" style="margin-top:15px;" class="hidden">
+        <div style="display:flex; justify-content:center; align-items:center; margin-bottom:10px;">
+             <p id="waitText" style="text-align:center; font-size:14px; margin:0;"></p>
+             <span id="roomStatus" class="status-waiting">Waiting</span>
+        </div>
+        <div style="display:flex; justify-content:center; gap: 5px;">
+             <p id="roomCodeDisplay" style="text-align:center; font-size:18px; color:#ff5c7a; font-weight:bold; margin:0;">Code: ----</p>
+             <button class="copy-btn" id="copyCodeBtn" onclick="copyRoomCode()"><i class="fas fa-copy"></i></button>
+        </div>
+    </div>
+  </div>
+
+  <div class="card hidden" id="secret">
+  <button class="light" onclick="show('setup')" style="width:auto; font-size:12px; margin-bottom:10px;">← Back</button>
+  <h3 id="secretTitle" style="text-align:center;">Set Secret</h3>
+    <p id="secretSub" style="font-size:13px; text-align:center; color:#666;">Waiting...</p>
+    <input id="secretInput" type="tel" placeholder="****" style="text-align:center; letter-spacing:8px; font-size:24px; font-weight:bold;">
+    <button class="primary" onclick="submitSecret()">Lock It 🔒</button>
+  </div>
+
+  <div class="card hidden" id="game">
+    <div id="gameHeaderBar">
+      <button class="light" onclick="showExitConfirm()" style="width:auto; padding:8px; font-size:14px;">Exit</button>
+      
+      <div id="timerDisplay" class="hidden">
+          <i class="fas fa-clock"></i> <span id="timerSeconds">--</span>
+      </div>
+
+      <button id="debugToggle" class="light" style="width:auto; padding:8px; font-size:12px; margin-left:8px;" onclick="toggleDebug()">Debug</button>
+
+      <span id="turnIndicator" style="font-size:16px; font-weight:bold; color:var(--p); text-align: right;">Your Turn</span>
+    </div>
+
+  <div id="debugPanel" class="hidden">
+    <div>Server turnStart: <span id="dbgServer">--</span></div>
+    <div>Local now: <span id="dbgNow">--</span></div>
+    <div>Remaining ms: <span id="dbgRem">--</span></div>
+  </div>
+
+    <div id="mySecretDisplay" class="hidden" style="margin-top: 15px;">
+        <span style="font-size: 14px; font-weight: 600;">My Secret:</span>
+        <span id="secretNumber">****</span>
+        <button id="secretToggleBtn" class="light" onclick="toggleSecretVisibility()"><i class="fas fa-eye"></i> Show</button>
+    </div>
+    
+    <button class="light" style="margin-bottom: 5px; margin-top: 10px;" onclick="toggleLogVisibility()">
+        <span id="logToggleText"><i class="fas fa-eye-slash"></i> Hide Game Log</span>
+    </button>
+    
+    <div id="gameLogArea">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0;">
+            <button id="myTab" class="light active-tab" style="border-radius: 12px 0 0 0; margin:0;" onclick="switchHistoryTab('my')">
+                <span id="myNameDisplay" class="tab-button-text"></span>
+            </button>
+            <button id="partnerTab" class="light inactive-tab" style="border-radius: 0 12px 0 0; margin:0;" onclick="switchHistoryTab('partner')">
+                <span id="partnerNameDisplay" class="tab-button-text"></span>
+            </button>
+        </div>
+
+        <div class="tab-content">
+            <div class="scroll-box" id="myHistoryBox" style="display:block;">
+                <table id="myHistoryTable">
+                    <thead><tr><th>#</th><th>Guess</th><th>Pos</th><th>Num</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="scroll-box" id="partnerHistoryBox" style="display:none;">
+                <table id="partnerHistoryTable">
+                    <thead><tr><th>#</th><th>Guess</th><th>Pos</th><th>Num</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div> <button class="light" style="margin-bottom: 5px; margin-top: 10px;" onclick="toggleScratchpad()">
+        <span id="scratchpadToggleText"><i class="fas fa-calculator"></i> Show Scratchpad</span>
+    </button>
+    
+    <div id="scratchpadContent" class="hidden">
+      <h5 style="margin:0 0 8px 0; color:#555; font-size:14px; text-align:center;">Tap to cross out excluded digits</h5>
+      <div class="digit-tracker" id="digitTracker">
+          <button class="digit-btn" data-digit="0" onclick="toggleDigit(0)">0</button>
+          <button class="digit-btn" data-digit="1" onclick="toggleDigit(1)">1</button>
+          <button class="digit-btn" data-digit="2" onclick="toggleDigit(2)">2</button>
+          <button class="digit-btn" data-digit="3" onclick="toggleDigit(3)">3</button>
+          <button class="digit-btn" data-digit="4" onclick="toggleDigit(4)">4</button>
+          <button class="digit-btn" data-digit="5" onclick="toggleDigit(5)">5</button>
+          <button class="digit-btn" data-digit="6" onclick="toggleDigit(6)">6</button>
+          <button class="digit-btn" data-digit="7" onclick="toggleDigit(7)">7</button>
+          <button class="digit-btn" data-digit="8" onclick="toggleDigit(8)">8</button>
+          <button class="digit-btn" data-digit="9" onclick="toggleDigit(9)">9</button>
+      </div>
+      <div style="margin-top:8px;">
+        <label for="potentialDigits" style="font-size:13px; color:#555; display:block; margin-bottom:4px;">Potential correct digits</label>
+        <input id="potentialDigits" placeholder="e.g. 1, 3, 7, 9" style="width:100%; padding:8px; font-size:14px; border-radius:10px; border:1px solid #ddd; box-sizing:border-box;">
+      </div>
+    </div>
+    
+    <div style="display:flex; gap:8px;">
+      <input id="guessInput" type="tel" placeholder="Enter guess...">
+      <button class="primary" onclick="submitGuess()" style="width:80px;">Go</button>
+    </div>
+
+    <div id="multiplayerExtras" class="hidden">
+      <div class="chat-container">
+        <div class="chat-box" id="chatBox"></div>
+        <div class="chat-input-row">
+          <input id="chatInput" placeholder="Say something..." style="margin:0;">
+          <div class="chat-btn-group">
+            <button class="light" onclick="sendChat()" style="background: var(--s); color: white;"><i class="fas fa-paper-plane"></i></button>
+            <button class="secondary" onclick="blastHearts(true)" style="background: var(--p); color: white;"><i class="fas fa-heart"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card hidden" id="win" style="text-align:center; padding:30px 20px;">
+    <h2 id="winTitle" style="color:var(--p); margin-bottom:5px;"></h2>
+    <h4 id="winSubtitle" style="color:#777; margin-top:0; font-weight:400;"></h4>
+    
+    <div id="streakDisplay" class="hidden"></div>
+    
+    <div id="rematchArea" class="hidden">
+      <button class="primary" onclick="requestRematch()">🔄 Rematch</button>
+      <p id="rematchStatus" style="font-size:12px; color:#888;"></p>
+    </div>
+    <button class="light" onclick="location.reload()">🏠 New Game / Menu</button>
+  </div>
+</div>
+
+<audio id="bgMusic" loop>
+  <!-- Softer, soothing background track -->
+  <source src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_bf2a6c3b8f.mp3?filename=calm-meditation-112191.mp3" type="audio/mpeg">
+</audio>
+<!-- Short sound effects for turn change and chat notifications -->
+<audio id="sfxTurn" preload="auto">
+  <source src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_c4b9fb5b3a.mp3?filename=correct-2-46134.mp3" type="audio/mpeg">
+</audio>
+<audio id="sfxChat" preload="auto">
+  <source src="https://cdn.pixabay.com/download/audio/2022/02/23/audio_4efc1b7601.mp3?filename=interface-124464.mp3" type="audio/mpeg">
+</audio>
+
+<script>
+// --- CONFIG ---
+const db = firebase.initializeApp({
+  apiKey: "AIzaSyAQcaDwFfBZ0qwtNDbXXUIkGD1Uus73_Pw",
+  databaseURL: "https://lovers-game-50020-default-rtdb.firebaseio.com",
+}).database();
+
+let state = { 
+  name: "", 
+  mode: "cpu", 
+  role: "", 
+  code: "", 
+  digits: 4, 
+  repeat: "no", 
+  secret: "", 
+  target: "", 
+  opponentName: "Opponent", 
+  audioOn: false,
+  guessCount: 0,
+  gameListenersAttached: false,
+  secretVisible: false,
+  gameActive: false,
+  // Timeout state
+  timeoutEnabled: false, 
+  timeoutDuration: 60,
+  timerIntervalId: null,
+  turnStartTimestamp: null,
+  currentTurn: null,
+  lastTurn: null,
+  rematchCount: 0,
+};
+let rematchRequested = false;
+
+// --- UTILS ---
+function show(id) {
+  document.getElementById('exitConfirmModal').classList.add('hidden');
+  
+  if ((id === 'home' || id === 'statsView') && state.gameActive && id !== 'game') {
+      if (id !== 'exitConfirmModal') {
+        showExitConfirm();
+        return; 
+      }
+  }
+  
+  document.querySelectorAll('.card').forEach(el => el.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  if(id==='statsView') loadStats();
+  
+  if (id === 'game' || id === 'secret') {
+    const inputs = document.querySelectorAll('#game input[type="tel"], #secret input[type="tel"]');
+    inputs.forEach(input => addInputRestrictions(input));
+  }
+}
+
+function setTheme(name) {
+  applyTheme(name);
+  localStorage.setItem('ng_theme', name);
+  // Close theme palette and return to current context
+  show(state.gameActive ? 'game' : 'home');
+}
+
+function showExitConfirm() {
+    if (state.gameActive) {
+        document.getElementById('exitConfirmModal').classList.remove('hidden');
+    } else {
+        show('home');
+    }
+}
+
+function confirmExit(shouldExit) {
+    document.getElementById('exitConfirmModal').classList.add('hidden');
+    if (shouldExit) {
+        state.gameActive = false; 
+        clearInterval(state.timerIntervalId);
+        localStorage.removeItem(`streak_${state.code}`); 
+        location.reload(); 
+    } else {
+        show('game');
+    }
+}
+
+
+function blastHearts(remote=false) {
+  for(let i=0; i<20; i++) setTimeout(() => {
+    const h = document.createElement("div");
+    h.innerHTML = ["❤️","💕","💖","🥰","😘"][Math.floor(Math.random()*5)];
+    h.className = "heart";
+    h.style.left = Math.random()*100 + "vw";
+    h.style.top = "100vh";
+    h.style.fontSize = (Math.random()*25 + 15) + "px";
+    document.body.appendChild(h);
+    setTimeout(() => h.remove(), 4000);
+  }, i*100);
+  if(remote && state.mode !== 'cpu') db.ref(`games/${state.code}/actions`).push({type: 'hearts', sender: state.role});
+}
+
+function copyRoomCode() {
+    const code = state.code;
+    if (!code) return;
+    
+    navigator.clipboard.writeText(code).then(() => {
+        const btn = document.getElementById('copyCodeBtn');
+        const originalIcon = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check"></i>';
+        btn.style.background = '#4CAF50';
+        
+        setTimeout(() => {
+            btn.innerHTML = originalIcon;
+            btn.style.background = '#3cc3c9';
+        }, 1500);
+  }).catch(err => {
+    console.error('Could not copy text: ', err);
+    showToast(`Failed to copy. Code: ${code}`);
+  });
+}
+
+// --- STATS LOGIC ---
+function loadStats() {
+  document.getElementById('s_cpu_w').innerText = localStorage.getItem('s_cpu_w') || 0;
+  document.getElementById('s_cpu_l').innerText = localStorage.getItem('s_cpu_l') || 0;
+  
+  const pvpStats = JSON.parse(localStorage.getItem('pvp_leaderboard') || '{}');
+  const container = document.getElementById('pvpLeaderboard');
+  container.innerHTML = "";
+  
+  if(Object.keys(pvpStats).length === 0) {
+    container.innerHTML = '<div style="text-align:center; color:#999; font-size:13px;">No records yet</div>';
+    return;
+  }
+  const sorted = Object.entries(pvpStats).sort((a,b) => b[1] - a[1]);
+  
+  sorted.forEach(([name, wins]) => {
+    container.innerHTML += `
+      <div class="leaderboard-row">
+        <span><i class="fas fa-trophy" style="color:gold; margin-right:5px;"></i> ${name}</span> 
+        <span class="badge">${wins} Wins</span>
+      </div>`;
+  });
+}
+
+function saveStat(type, winnerName) {
+  if (type === 'cpu') {
+    let key = winnerName === 'win' ? 's_cpu_w' : 's_cpu_l';
+    localStorage.setItem(key, parseInt(localStorage.getItem(key)||0) + 1);
+  } else {
+    let stats = JSON.parse(localStorage.getItem('pvp_leaderboard') || '{}');
+    let cleanName = winnerName || "Unknown";
+    stats[cleanName] = (stats[cleanName] || 0) + 1;
+    localStorage.setItem('pvp_leaderboard', JSON.stringify(stats));
+  }
+}
+
+function updateWinStreak(won) {
+    const streakKey = `streak_${state.code}_${state.opponentName}`;
+    let streak = parseInt(localStorage.getItem(streakKey) || 0);
+    
+    if (won) {
+        streak += 1;
+    } else {
+        streak = 0;
+    }
+    
+    localStorage.setItem(streakKey, streak);
+    return streak;
+}
+
+function resetStats() {
+  showConfirm("Are you sure you want to clear all stats? This cannot be undone.", function() {
+    localStorage.clear();
+    loadStats();
+    showToast('All stats cleared.');
+  });
+}
+
+// --- SETUP ---
+function setupGame(mode) {
+  state.mode = mode;
+  state.name = document.getElementById("nameInput").value.trim() || (mode==='create'?"Player 1":(mode==='join'?"Player 2":"Player"));
+  
+  document.getElementById('joinUI').classList.add('hidden');
+  document.getElementById('createUI').classList.add('hidden');
+  document.getElementById('roomInfoDisplay').classList.add('hidden');
+  
+  if (mode === 'join') {
+    document.getElementById('digitsSelect').disabled = true;
+    document.getElementById('repeatSelect').disabled = true;
+    document.getElementById('timeoutEnable').disabled = true;
+    document.getElementById('timeoutDuration').disabled = true;
+    document.getElementById('joinUI').classList.remove('hidden');
+  } else if (mode === 'create') {
+    document.getElementById('digitsSelect').disabled = false;
+    document.getElementById('repeatSelect').disabled = false;
+    document.getElementById('timeoutEnable').disabled = false;
+    document.getElementById('timeoutDuration').disabled = false;
+    document.getElementById('createUI').classList.remove('hidden');
+  } else {
+    document.getElementById('digitsSelect').disabled = false;
+    document.getElementById('repeatSelect').disabled = false;
+    document.getElementById('timeoutEnable').disabled = false;
+    document.getElementById('timeoutDuration').disabled = false;
+  }
+  
+  document.getElementById('timeoutEnable').onchange = function() {
+      document.getElementById('timeoutDurationDiv').classList.toggle('hidden', !this.checked);
+  };
+
+  show('setup');
+}
+
+function proceedToGame() {
+  state.digits = parseInt(document.getElementById("digitsSelect").value);
+  state.repeat = document.getElementById("repeatSelect").value;
+  
+  // Read timeout settings from UI for all modes (including CPU)
+  state.timeoutEnabled = document.getElementById('timeoutEnable').checked;
+  state.timeoutDuration = state.timeoutEnabled ? parseInt(document.getElementById('timeoutDuration').value) : 0;
+
+  state.gameListenersAttached = false;
+
+  if (state.mode === 'cpu') initCPU();
+  else if (state.mode === 'create') createRoom();
+  else if (state.mode === 'join') joinRoom();
+}
+
+// --- CORE LOGIC ---
+function initCPU() {
+  let pool = "0123456789".split(""), t = "";
+  for(let i=0; i<state.digits; i++) {
+    if(state.repeat === "no") {
+      let idx = Math.floor(Math.random() * pool.length);
+      t += pool[idx]; pool.splice(idx, 1);
+    } else t += Math.floor(Math.random()*10);
+  }
+  state.target = t;
+  state.opponentName = "CPU"; 
+  state.secret = t; 
+  startUI();
+  // If timeout enabled for CPU matches, start turn timer: set turnStart locally
+  if (state.timeoutEnabled && state.timeoutDuration > 0) {
+    // For CPU matches there is no server timestamp; emulate a turnStart using local time
+    const ts = Date.now();
+    state.currentTurn = 'p1'; // player starts
+    startTurnTimer(ts);
+  }
+}
+
+function updateRoomStatus(isReady = false) {
+    const statusEl = document.getElementById('roomStatus');
+    const waitTextEl = document.getElementById('waitText');
+    const proceedBtn = document.querySelector('#setup .primary');
+    
+    if (isReady) {
+        statusEl.innerText = "Ready";
+        statusEl.classList.remove('status-waiting');
+        statusEl.classList.add('status-ready');
+        waitTextEl.innerText = `${state.opponentName} joined!`;
+        document.getElementById('digitsSelect').disabled = true;
+        document.getElementById('repeatSelect').disabled = true;
+        document.getElementById('timeoutEnable').disabled = true;
+        document.getElementById('timeoutDuration').disabled = true;
+        proceedBtn.innerText = "Start Game";
+    } else {
+        statusEl.innerText = "Waiting";
+        statusEl.classList.add('status-waiting');
+        statusEl.classList.remove('status-ready');
+        waitTextEl.innerText = "Waiting for partner...";
+        proceedBtn.innerText = "Start Game"; 
+    }
+}
+
+function createRoom() {
+  state.role = "p1";
+  state.code = Math.random().toString(36).substring(2,6).toUpperCase();
+  document.getElementById('roomInfoDisplay').classList.remove('hidden');
+  document.getElementById('roomCodeDisplay').innerHTML = `Code: <b>${state.code}</b>`;
+  document.querySelector('#setup .primary').classList.add('hidden');
+  updateRoomStatus(false);
+
+  const gameRef = db.ref(`games/${state.code}`);
+  // Ensure p1 entry is removed if this client disconnects
+  gameRef.child('p1').onDisconnect().remove();
+  gameRef.set({
+    settings: {
+      digits: state.digits,
+      repeat: state.repeat,
+      timeout: state.timeoutEnabled,
+      duration: state.timeoutDuration
+    },
+    turn: "p1"
+  });
+  gameRef.child('p1').set({ name: state.name });
+  
+  db.ref(`games/${state.code}/p2`).on("value", snap => {
+    if(snap.exists()) {
+      state.opponentName = snap.val().name || "Player 2";
+      updateRoomStatus(true);
+      document.querySelector('#setup .primary').classList.remove('hidden');
+      show('secret');
+      document.getElementById('secretTitle').innerText = "Hey Partner! 👋";
+      document.getElementById('secretSub').innerText = `${state.opponentName} has joined.`;
+      waitForSecrets();
+      db.ref(`games/${state.code}/p2`).off(); 
+    }
+  });
+}
+
+function joinRoom() {
+    state.role = "p2";
+    // We trim and uppercase to prevent common typing errors
+    const inputCode = document.getElementById("joinCodeInput").value.trim().toUpperCase();
+    state.code = inputCode;
+
+    if (!inputCode) {
+        showErrorModal();
+        return;
+    }
+
+    db.ref(`games/${state.code}`).once("value").then(snap => {
+        if (!snap.exists()) {
+            showErrorModal();
+            return;
+        }
+
+        const g = snap.val();
+        const s = g.settings;
+        
+        // Sync settings from the room creator
+        state.digits = s.digits;
+        state.repeat = s.repeat;
+        state.timeoutEnabled = s.timeout;
+        state.timeoutDuration = s.duration;
+        state.opponentName = g.p1.name;
+
+        // Mark presence in the database
+        db.ref(`games/${state.code}/p2`).set({
+            name: state.name,
+            present: true
+        });
+        
+        // Setup disconnect listener
+        db.ref(`games/${state.code}/p2/present`).onDisconnect().remove();
+
+        show('secret');
+        waitForSecrets();
+    }).catch(err => {
+        console.error("Firebase Join Error:", err);
+        showErrorModal();
+    });
+}
+
+// UI Helper Functions for Error Modal
+function showErrorModal() {
+    document.getElementById('errorModal').classList.remove('hidden');
+}
+
+function closeErrorModal() {
+    document.getElementById('errorModal').classList.add('hidden');
+    // Optional: Clear the input and focus it for the user
+    const input = document.getElementById("joinCodeInput");
+    input.value = "";
+    input.focus();
+}
+
+function waitForSecrets() {
+  document.getElementById("secretInput").value = "";
+  document.getElementById("secretInput").disabled = false;
+  // Reset local secret/target to avoid carrying over previous round
+  state.secret = "";
+  state.target = "";
+  state.guessCount = 0;
+  const ref = db.ref(`games/${state.code}`);
+  ref.on("value", function secretListener(snap) {
+    const g = snap.val();
+    if(!g) return;
+    if(g.status === 'resetting') return;
+    if(g.p1?.secret && g.p2?.secret) {
+      state.target = (state.role === "p1") ? g.p2.secret : g.p1.secret;
+      state.secret = (state.role === "p1") ? g.p1.secret : g.p2.secret;
+      ref.off('value', secretListener);
+      startUI();
+      listenMultiplayerGame();
+    }
+  });
+}
+
+function submitSecret() {
+  const val = document.getElementById("secretInput").value;
+  if (val.length !== state.digits) return showToast(`Need exactly ${state.digits} digits.`);
+  if(state.mode !== 'cpu') {
+    document.getElementById("secretInput").disabled = true;
+    document.getElementById("secretSub").innerText = "Locked! Waiting for partner...";
+    state.secret = val;
+    db.ref(`games/${state.code}/${state.role}/secret`).set(val);
+  }
+}
+
+function startUI() {
+  show('game');
+  state.gameActive = true; 
+  document.querySelector('#myHistoryTable tbody').innerHTML = "";
+  document.querySelector('#partnerHistoryTable tbody').innerHTML = "";
+  document.getElementById('myNameDisplay').innerText = state.name;
+  document.getElementById('partnerNameDisplay').innerText = state.opponentName;
+  state.guessCount = 0; 
+  document.getElementById('guessInput').value = "";
+  document.getElementById('mySecretDisplay').classList.remove('hidden');
+  state.secretVisible = false;
+  updateSecretDisplay();
+
+  const timerDisplay = document.getElementById('timerDisplay');
+  // Show timer for both CPU and multiplayer modes when timeout is enabled
+  if (state.timeoutEnabled) {
+      timerDisplay.classList.remove('hidden');
+      timerDisplay.classList.remove('timer-fast-pulse', 'timer-medium-pulse');
+      document.getElementById('timerSeconds').innerText = state.timeoutDuration;
+  } else {
+      timerDisplay.classList.add('hidden');
+  }
+
+  // Ensure saved theme is applied when entering game
+  const savedTheme = localStorage.getItem('ng_theme');
+  if (savedTheme) applyTheme(savedTheme);
+  
+  document.getElementById('logToggleText').innerHTML = '<i class="fas fa-eye-slash"></i> Hide Game Log';
+  document.getElementById('gameLogArea').classList.remove('hidden');
+  document.querySelectorAll('.digit-btn').forEach(btn => btn.classList.remove('excluded'));
+  document.getElementById('scratchpadContent').classList.add('hidden');
+  document.getElementById('scratchpadToggleText').innerHTML = '<i class="fas fa-calculator"></i> Show Scratchpad';
+  document.getElementById('multiplayerExtras').className = (state.mode === 'cpu') ? 'hidden' : '';
+
+  // Hide the secret display completely in CPU mode
+  if (state.mode === 'cpu') {
+    document.getElementById('mySecretDisplay').classList.add('hidden');
+  }
+}
+
+
+// --- TIMER LOGIC ---
+function updateTimerDisplay(timeLeft) {
+    const timerDisplay = document.getElementById('timerSeconds');
+    const displayContainer = document.getElementById('timerDisplay');
+    timerDisplay.innerText = timeLeft;
+    displayContainer.classList.remove('timer-fast-pulse', 'timer-medium-pulse');
+    if (timeLeft <= 10 && timeLeft > 0) {
+        displayContainer.classList.add('timer-fast-pulse');
+    } else if (timeLeft <= 20 && timeLeft > 0) {
+        displayContainer.classList.add('timer-medium-pulse');
+    }
+}
+
+function startTurnTimer(turnStartTimestamp) {
+  clearInterval(state.timerIntervalId);
+  if (!state.timeoutEnabled || state.timeoutDuration === 0) return;
+
+  state.turnStartTimestamp = turnStartTimestamp;
+  const initialLeft = Math.max(0, Math.ceil((turnStartTimestamp + state.timeoutDuration * 1000 - Date.now()) / 1000));
+  updateTimerDisplay(initialLeft);
+
+  let prevSec = initialLeft;
+  state.timerIntervalId = setInterval(() => {
+    const now = Date.now();
+    const remMs = turnStartTimestamp + state.timeoutDuration * 1000 - now;
+    const timeLeft = Math.max(0, Math.ceil(remMs / 1000));
+
+    if (timeLeft !== prevSec) {
+      updateTimerDisplay(timeLeft);
+      prevSec = timeLeft;
+    }
+
+    if (timeLeft <= 0) {
+      clearInterval(state.timerIntervalId);
+      state.timerIntervalId = null;
+
+      // When timer hits zero:
+      // - In CPU mode: player immediately loses the game.
+      // - In multiplayer mode: server is responsible for declaring the winner.
+      if (state.mode === 'cpu' && state.currentTurn === 'p1') {
+        saveStat('cpu', 'lose'); // count as CPU win stat-wise
+        endGame(false, 'timeout');
+      }
+    }
+  }, 200);
+}
+
+function makeCPUMove() {
+  const guess = generateCPUGuess(); // Generate a guess for the CPU
+  processGuess(guess, 'cpu'); // Process the CPU's guess
+  state.currentTurn = 'p1'; // Switch turn back to the player
+  startTurnTimer(Date.now()); // Restart the timer for the player's turn
+}
+
+function generateCPUGuess() {
+  const pool = "0123456789".split("");
+  let guess = "";
+  for (let i = 0; i < state.digits; i++) {
+    if (state.repeat === "no") {
+      const idx = Math.floor(Math.random() * pool.length);
+      guess += pool[idx];
+      pool.splice(idx, 1);
+    } else {
+      guess += Math.floor(Math.random() * 10);
+    }
+  }
+  return guess;
+}
+
+function processGuess(guess, role) {
+  // Logic to process the guess and update the game state
+  // This function should handle feedback and determine if the game is won
+  console.log(`${role} guessed: ${guess}`);
+}
+
+function stopTurnTimer() {
+    clearInterval(state.timerIntervalId);
+    state.timerIntervalId = null;
+    state.turnStartTimestamp = null;
+    document.getElementById('timerSeconds').innerText = state.timeoutDuration || '--';
+    document.getElementById('timerDisplay').classList.remove('timer-fast-pulse', 'timer-medium-pulse');
+}
+// --- END TIMER LOGIC ---
+
+
+function toggleSecretVisibility() {
+    state.secretVisible = !state.secretVisible;
+    updateSecretDisplay();
+}
+
+// --- Small effects: sound + vibration ---
+function safeVibrate(pattern) {
+  try {
+    if (navigator.vibrate) navigator.vibrate(pattern);
+  } catch(e) {
+    // ignore vibration errors
+  }
+}
+
+function playSfx(id) {
+  try {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Play at gentle volume, independent of background music toggle
+    el.volume = 0.4;
+    el.currentTime = 0;
+    el.play().catch(() => {});
+  } catch(e) {
+    // ignore audio errors
+  }
+}
+
+function playTurnChangeEffect() {
+  playSfx('sfxTurn');
+  safeVibrate(40);
+  try {
+    const ti = document.getElementById('turnIndicator');
+    if (ti) {
+      ti.classList.remove('turn-blink');
+      // Force reflow so animation can restart
+      // eslint-disable-next-line no-unused-expressions
+      void ti.offsetWidth;
+      ti.classList.add('turn-blink');
+    }
+  } catch(e) {
+    // ignore UI animation errors
+  }
+}
+
+function playChatNotificationEffect() {
+  playSfx('sfxChat');
+  safeVibrate([20, 40, 20]);
+}
+
+function updateSecretDisplay() {
+    const numDisplay = document.getElementById('secretNumber');
+    const toggleBtn = document.getElementById('secretToggleBtn');
+    if (state.secretVisible) {
+        numDisplay.innerText = state.secret;
+        numDisplay.style.letterSpacing = '5px';
+        toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide';
+        toggleBtn.style.background = '#ff4d4d'; 
+        toggleBtn.style.color = 'white';
+    } else {
+        numDisplay.innerText = '*'.repeat(state.digits);
+        numDisplay.style.letterSpacing = '10px';
+        toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show';
+        toggleBtn.style.background = '#ccc';
+        toggleBtn.style.color = '#333';
+    }
+}
+
+function toggleLogVisibility() {
+    const logArea = document.getElementById('gameLogArea');
+    const logToggleText = document.getElementById('logToggleText');
+    const isHidden = logArea.classList.toggle('hidden');
+    if (isHidden) {
+        logToggleText.innerHTML = '<i class="fas fa-eye"></i> Show Game Log';
+    } else {
+        logToggleText.innerHTML = '<i class="fas fa-eye-slash"></i> Hide Game Log';
+    }
+}
+
+
+function switchHistoryTab(tab) {
+    const myTab = document.getElementById('myTab');
+    const partnerTab = document.getElementById('partnerTab');
+    const myHistoryBox = document.getElementById('myHistoryBox');
+    const partnerHistoryBox = document.getElementById('partnerHistoryBox');
+    if (tab === 'my') {
+        myTab.classList.add('active-tab');
+        myTab.classList.remove('inactive-tab');
+        partnerTab.classList.remove('active-tab');
+        partnerTab.classList.add('inactive-tab');
+        myHistoryBox.style.display = 'block';
+        partnerHistoryBox.style.display = 'none';
+    } else if (tab === 'partner') {
+        partnerTab.classList.add('active-tab');
+        partnerTab.classList.remove('inactive-tab');
+        myTab.classList.remove('active-tab');
+        myTab.classList.add('inactive-tab');
+        myHistoryBox.style.display = 'none';
+        partnerHistoryBox.style.display = 'block';
+    }
+}
+
+function toggleScratchpad() {
+    const content = document.getElementById('scratchpadContent');
+    const toggleText = document.getElementById('scratchpadToggleText');
+    const isHidden = content.classList.contains('hidden');
+    if (isHidden) {
+        content.classList.remove('hidden');
+        toggleText.innerHTML = '<i class="fas fa-calculator"></i> Hide Scratchpad';
+    } else {
+        content.classList.add('hidden');
+        toggleText.innerHTML = '<i class="fas fa-calculator"></i> Show Scratchpad';
+    }
+}
+
+
+function toggleDigit(digit) {
+  const btn = document.querySelector(`.digit-btn[data-digit="${digit}"]`);
+  if (btn) btn.classList.toggle('excluded');
+}
+
+function addInputRestrictions(input) {
+  input.oninput = null; 
+  input.addEventListener('input', function() {
+    let value = this.value.replace(/[^0-9]/g, '');
+    if (state.repeat === 'no') {
+      let uniqueValue = '';
+      const seen = new Set();
+      for (let i = 0; i < value.length; i++) {
+        const digit = value[i];
+        if (!seen.has(digit)) {
+          seen.add(digit);
+          uniqueValue += digit;
+        }
+      }
+      value = uniqueValue;
+    }
+    this.value = value.slice(0, state.digits);
+  });
+}
+
+function getFeedback(guess, target) {
+  let p = 0; let n = 0;
+  let gA = guess.split(''); let tA = target.split('');
+  for(let i = 0; i < state.digits; i++) if(gA[i] === tA[i]) p++; 
+  let tCopy = [...tA]; 
+  for(let i = 0; i < state.digits; i++) {
+    const digit = gA[i];
+    const targetIndex = tCopy.findIndex(d => d === digit);
+    if(targetIndex !== -1) { 
+      n++; 
+      tCopy.splice(targetIndex, 1);
+    }
+  }
+  return {p, n};
+}
+
+function submitGuess() {
+  const guess = document.getElementById("guessInput").value;
+  if (guess.length !== state.digits) return showToast(`Guess must have ${state.digits} digits.`);
+  if(state.mode === 'cpu') {
+    state.guessCount++; 
+    const fb = getFeedback(guess, state.target);
+    addHistoryRow(guess, fb.p, fb.n, "You", state.guessCount); 
+    if(fb.p === state.digits) { 
+      saveStat('cpu', 'win'); 
+      endGame(true, 'normal'); 
+    } else if (state.timeoutEnabled && state.timeoutDuration > 0) {
+      // Restart timer for the next guess window in CPU mode
+      state.currentTurn = 'p1';
+      startTurnTimer(Date.now());
+    }
+    document.getElementById("guessInput").value = "";
+  } else {
+    db.ref(`games/${state.code}`).once("value").then(snap => {
+      if(snap.val().turn !== state.role) return showToast("Wait for your turn!");
+      stopTurnTimer();
+      let currentGuessCount = snap.val().guessCount || 0;
+      currentGuessCount++;
+      db.ref(`games/${state.code}/guessCount`).set(currentGuessCount); 
+      const fb = getFeedback(guess, state.target);
+      db.ref(`games/${state.code}/moves`).push({ 
+        user: state.name, guess: guess, p: fb.p, n: fb.n, id: currentGuessCount 
+      });
+      if(fb.p === state.digits) {
+        db.ref(`games/${state.code}/winner`).set(state.role);
+      } else {
+        const nextRole = state.role==="p1"?"p2":"p1";
+        db.ref(`games/${state.code}/turn`).set(nextRole);
+        db.ref(`games/${state.code}/turnStart`).set(firebase.database.ServerValue.TIMESTAMP);
+      }
+      document.getElementById("guessInput").value = "";
+    });
+  }
+}
+
+function addHistoryRow(g, p, n, user, guessId) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${guessId}</td><td><b>${g}</b></td><td style="font-weight:bold; color:var(--p);">${p}</td><td style="font-weight:bold; color:var(--s);">${n}</td>`;
+  let tableBody, scrollBox;
+  if (user === state.name || user === 'You' || state.mode === 'cpu') {
+      tableBody = document.querySelector('#myHistoryTable tbody');
+      scrollBox = document.getElementById("myHistoryBox");
+      if (user === state.name) tr.style.background = "#fff0f3"; 
+  } else {
+      tableBody = document.querySelector('#partnerHistoryTable tbody');
+      scrollBox = document.getElementById("partnerHistoryBox");
+      tr.style.background = "#eff8ff"; 
+  }
+  if (tableBody) tableBody.appendChild(tr);
+  if (scrollBox) scrollBox.scrollTop = scrollBox.scrollHeight;
+}
+
+function listenMultiplayerGame() {
+  if (state.gameListenersAttached) return;
+  state.gameListenersAttached = true;
+  const ref = db.ref(`games/${state.code}`);
+  ref.child('guessCount').once('value', snap => { state.guessCount = snap.val() || 0; });
+  ref.child('moves').on('child_added', snap => {
+    const m = snap.val();
+    addHistoryRow(m.guess, m.p, m.n, m.user, m.id); 
+  });
+  ref.on('value', function gameValueListener(snap) {
+    const g = snap.val();
+    if(!g) return;
+    // Track current turn role for timeout decisions and effects
+    const newTurn = g.turn || null;
+    if (newTurn && newTurn !== state.currentTurn) {
+      state.lastTurn = state.currentTurn;
+      state.currentTurn = newTurn;
+      // Play a subtle cue when the turn changes
+      playTurnChangeEffect();
+    } else {
+      state.currentTurn = newTurn;
+    }
+
+    if(g.winner) {
+      ref.off('value', gameValueListener);
+      db.ref(`games/${state.code}/moves`).off('child_added');
+      db.ref(`games/${state.code}/chat`).off('child_added'); 
+      db.ref(`games/${state.code}/actions`).off('child_added'); 
+      state.gameListenersAttached = false; 
+      stopTurnTimer();
+      const iWon = g.winner.startsWith(state.role);
+      const isTimeoutWin = g.winner.endsWith("_timeout");
+      const isLeftWin = g.winner.endsWith("_opponent_left");
+      let winnerName = iWon ? state.name : state.opponentName;
+
+      if (isTimeoutWin) {
+          winnerName = g.winner === state.role + "_timeout" ? state.opponentName : state.name;
+          saveStat('pvp', winnerName); endGame(iWon, 'timeout');
+      } else if (isLeftWin) {
+          // If opponent left, the player remaining wins
+          winnerName = iWon ? state.name : state.opponentName;
+          saveStat('pvp', winnerName); endGame(iWon, 'left');
+      } else {
+          saveStat('pvp', winnerName); endGame(iWon, 'normal');
+      }
+      return;
+    } 
+    const myTurn = g.turn === state.role;
+    document.getElementById("turnIndicator").innerText = myTurn ? "YOUR TURN!" : `${state.opponentName}'s Turn...`;
+    document.getElementById("turnIndicator").style.color = myTurn ? "var(--p)" : "#aaa";
+    if (state.timeoutEnabled && g.turnStart) {
+        const turnStartTimestamp = g.turnStart;
+        if (state.turnStartTimestamp !== turnStartTimestamp) {
+          // save server start for debug UI
+          state.debug.serverTurnStart = turnStartTimestamp;
+          updateDebugDisplay();
+          if (myTurn) startTurnTimer(turnStartTimestamp);
+          else stopTurnTimer();
+        }
+    } else if (state.timeoutEnabled && myTurn && !g.turnStart) {
+         db.ref(`games/${state.code}/turnStart`).set(firebase.database.ServerValue.TIMESTAMP);
+    }
+  });
+  ref.child('chat').on('child_added', snap => {
+    const c = snap.val();
+    const box = document.getElementById("chatBox");
+    const isMe = (c.user === state.name || c.user === 'You');
+    const msgClass = isMe ? 'me' : 'them';
+    box.innerHTML += `<div class="chat-msg ${msgClass}"><span class="chat-user">${c.user}:</span> ${c.msg}</div>`;
+    box.scrollTop = box.scrollHeight;
+    // Play chat notification sound for every incoming message
+    playChatNotificationEffect();
+  });
+  ref.child('actions').on('child_added', snap => {
+    if(snap.val().sender !== state.role) blastHearts(false);
+    snap.ref.remove();
+  });
+}
+
+// --- UI: Toast messages ---
+function showToast(msg, secs = 3000) {
+  let t = document.getElementById('toast');
+  if(!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.className = 'toast';
+    document.body.appendChild(t);
+  }
+  t.innerText = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, secs);
+}
+
+// --- In-UI Confirm Modal API ---
+let confirmCallback = null;
+function showConfirm(message, onConfirm) {
+  confirmCallback = onConfirm || null;
+  const el = document.getElementById('confirmMessage');
+  if (el) el.innerText = message;
+  document.getElementById('confirmModal').classList.remove('hidden');
+}
+function confirmCancel() {
+  document.getElementById('confirmModal').classList.add('hidden');
+  confirmCallback = null;
+}
+function confirmOk() {
+  document.getElementById('confirmModal').classList.add('hidden');
+  try { if (confirmCallback) confirmCallback(); } catch(e) { console.error(e); }
+  confirmCallback = null;
+}
+
+// --- Debug UI ---
+state.debug = { enabled: false };
+function toggleDebug() {
+  state.debug.enabled = !state.debug.enabled;
+  document.getElementById('debugPanel').classList.toggle('hidden', !state.debug.enabled);
+  document.getElementById('debugToggle').innerText = state.debug.enabled ? 'Debug ✓' : 'Debug';
+}
+function updateDebugDisplay() {
+  if(!state.debug.enabled) return;
+  const s = document.getElementById('dbgServer');
+  const n = document.getElementById('dbgNow');
+  const r = document.getElementById('dbgRem');
+  const server = state.debug.serverTurnStart || '--';
+  const now = Date.now();
+  const rem = state.debug.serverTurnStart ? (state.debug.serverTurnStart + (state.timeoutDuration||0)*1000 - now) : '--';
+  s.innerText = server;
+  n.innerText = now;
+  r.innerText = rem;
+}
+
+function endGame(win, reason = '') {
+  show('win');
+  state.gameActive = false; blastHearts(); stopTurnTimer(); 
+  const winTitleEl = document.getElementById("winTitle");
+  const winSubtitleEl = document.getElementById("winSubtitle");
+  const streak = updateWinStreak(win);
+  const streakDisplay = document.getElementById('streakDisplay');
+  streakDisplay.classList.remove('hidden');
+  if (reason === 'timeout') {
+    if (win) { winTitleEl.innerText = "Time's Up! ⏱️"; winSubtitleEl.innerText = `${state.opponentName} ran out of time. You win by timeout!`; }
+    else { winTitleEl.innerText = "Timeout Defeat ⌛"; winSubtitleEl.innerText = `You failed to guess in time. ${state.opponentName} wins.`; }
+  } else if (reason === 'left') {
+    if (win) { winTitleEl.innerText = "Opponent Left ⚠️"; winSubtitleEl.innerText = `${state.opponentName} left the game. You win by forfeit.`; }
+    else { winTitleEl.innerText = "You Left ❌"; winSubtitleEl.innerText = `You left the game. ${state.opponentName} wins.`; }
+  } else {
+      const loseTitles = [
+        "Winner of Hearts ❤️",
+        "Winner of Tears 🥲",
+        "Winner of Kisses 💋",
+        "Champion of Hugs 🤗",
+        "Crown of Choco 🍫",
+        "Emperor of Smiles 😄",
+        "Keeper of Secrets 🔐",
+        "Bringer of Roses 🌹"
+      ];
+      winTitleEl.innerText = win ? "Winner Winner Chicken Dinner! 🍗" : loseTitles[Math.floor(Math.random()*loseTitles.length)];
+      winSubtitleEl.innerText = win ? "You cracked the code!" : `Won by ${state.opponentName}`;
+  }
+  if (streak > 1) streakDisplay.innerHTML = `<i class="fas fa-bolt"></i> **${streak}** Win Streak against ${state.opponentName}!`;
+  else if (win) streakDisplay.innerHTML = `You started a streak!`;
+  else streakDisplay.classList.add('hidden');
+  const rematchDiv = document.getElementById("rematchArea");
+  if (state.mode !== 'cpu' && state.rematchCount === 0) {
+    // Offer rematch only once per room (prevents future auto-loop issues)
+    rematchDiv.classList.remove('hidden');
+    document.getElementById("rematchStatus").innerText = "";
+    rematchRequested = false;
+    listenForRematch();
+  } else {
+    rematchDiv.classList.add('hidden');
+  }
+}
+
+function requestRematch() {
+  if(rematchRequested) return;
+  showConfirm("Play a rematch?", function() {
+    rematchRequested = true;
+    document.getElementById("rematchStatus").innerText = "Waiting for partner...";
+    db.ref(`games/${state.code}/rematch/${state.role}`).set(true);
+  });
+}
+
+function listenForRematch() {
+  const rematchRef = db.ref(`games/${state.code}/rematch`);
+  const statusRef = db.ref(`games/${state.code}/status`);
+  rematchRef.on('value', function rematchListener(snap) {
+    const r = snap.val();
+    if(r && r.p1 && r.p2) {
+       rematchRef.off('value', rematchListener);
+       if(state.role === "p1") {
+         db.ref(`games/${state.code}`).update({ moves: null, winner: null, turn: "p1", "p1/secret": null, "p2/secret": null, rematch: null, status: "resetting", guessCount: 0, turnStart: firebase.database.ServerValue.TIMESTAMP });
+         setTimeout(() => { db.ref(`games/${state.code}/status`).set("playing"); }, 1000);
+       }
+    }
+  });
+  statusRef.on('value', function statusListener(snap) {
+     if(snap.val() === "playing" && document.getElementById("win").classList.contains("hidden") === false) {
+        statusRef.off('value', statusListener); rematchRef.off(); 
+        state.gameListenersAttached = false;
+        state.rematchCount += 1;
+        show('secret');
+        document.getElementById('secretTitle').innerText = "Rematch!";
+        document.getElementById('secretSub').innerText = "Set a new secret number.";
+        waitForSecrets();
+     }
+  });
+}
+
+function sendChat() {
+  const txt = document.getElementById("chatInput").value;
+  if(txt && state.code) { db.ref(`games/${state.code}/chat`).push({user: state.name, msg: txt}); document.getElementById("chatInput").value = ""; }
+}
+
+function toggleMusic() { 
+  state.audioOn = !state.audioOn; document.getElementById("musicIcon").className = state.audioOn ? "fas fa-volume-up" : "fas fa-volume-mute";
+  const musicEl = document.getElementById("bgMusic");
+  musicEl.volume = 0.3; // low background volume
+  if (state.audioOn) musicEl.play().catch(e => console.error("Music playback failed:", e));
+  else musicEl.pause();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const inputs = document.querySelectorAll('input[type="tel"]');
+  inputs.forEach(input => addInputRestrictions(input));
+  // Apply saved theme immediately
+  const saved = localStorage.getItem('ng_theme');
+  if (saved) {
+    const sel = document.getElementById('themeSelect'); if (sel) sel.value = saved;
+    applyTheme(saved);
+  }
+});
+
+// Theme application
+function applyTheme(name) {
+  const root = document.documentElement.style;
+  // Theme-specific body class for CSS animations
+  document.body.classList.remove('theme-love','theme-calm','theme-sunset','theme-forest','theme-ocean','theme-aurora','theme-candy','theme-neon','theme-midnight','theme-dark');
+  document.body.classList.add(`theme-${name}`);
+  if (name === 'love') {
+    root.setProperty('--p', '#ff5c7a');
+    root.setProperty('--s', '#3cc3c9');
+    root.setProperty('--bg', 'linear-gradient(135deg,#fff0f3,#e0f7fa)');
+    root.setProperty('--card-bg', '#ffffff');
+    root.setProperty('--text-color', '#222');
+  } else if (name === 'romantic') {
+    root.setProperty('--p', '#d6336c');
+    root.setProperty('--s', '#9b59b6');
+    root.setProperty('--bg', 'linear-gradient(135deg,#fff0f5,#f6e6ff)');
+    root.setProperty('--card-bg', '#fff7fb');
+    root.setProperty('--text-color', '#2b1320');
+  } else if (name === 'calm') {
+    root.setProperty('--p', '#3cc3c9');
+    root.setProperty('--s', '#6fb3b8');
+    root.setProperty('--bg', 'linear-gradient(135deg,#f0fbfb,#e8f7ff)');
+    root.setProperty('--card-bg', '#ffffff');
+    root.setProperty('--text-color', '#123');
+  } else if (name === 'sunset') {
+    root.setProperty('--p', '#ff7e5f');
+    root.setProperty('--s', '#ffd1a0');
+    root.setProperty('--bg', 'linear-gradient(135deg,#ff7e5f,#ffd1a0)');
+    root.setProperty('--card-bg', 'rgba(255,255,255,0.92)');
+    root.setProperty('--text-color', '#3b1d1a');
+  } else if (name === 'forest') {
+    root.setProperty('--p', '#2e7d32');
+    root.setProperty('--s', '#b2ffb0');
+    root.setProperty('--bg', 'linear-gradient(135deg,#1b5e20,#b2ffb0)');
+    root.setProperty('--card-bg', 'rgba(255,255,255,0.95)');
+    root.setProperty('--text-color', '#0b2410');
+  } else if (name === 'ocean') {
+    root.setProperty('--p', '#0072ff');
+    root.setProperty('--s', '#a5e9ff');
+    root.setProperty('--bg', 'linear-gradient(135deg,#001b2e,#0072ff,#a5e9ff)');
+    root.setProperty('--card-bg', 'rgba(255,255,255,0.95)');
+    root.setProperty('--text-color', '#031927');
+  } else if (name === 'aurora') {
+    root.setProperty('--p', '#4b6cb7');
+    root.setProperty('--s', '#182848');
+    root.setProperty('--bg', 'linear-gradient(135deg,#0f2027,#4b6cb7,#182848)');
+    root.setProperty('--card-bg', 'rgba(10,20,40,0.96)');
+    root.setProperty('--text-color', '#e0f7fa');
+  } else if (name === 'candy') {
+    root.setProperty('--p', '#ff9a9e');
+    root.setProperty('--s', '#fecfef');
+    root.setProperty('--bg', 'linear-gradient(135deg,#ff9a9e,#fecfef)');
+    root.setProperty('--card-bg', 'rgba(255,255,255,0.96)');
+    root.setProperty('--text-color', '#4a0b2b');
+  } else if (name === 'neon') {
+    root.setProperty('--p', '#00f260');
+    root.setProperty('--s', '#0575e6');
+    root.setProperty('--bg', 'linear-gradient(135deg,#000428,#004e92,#00f260)');
+    root.setProperty('--card-bg', 'rgba(3,10,30,0.96)');
+    root.setProperty('--text-color', '#e0f7fa');
+  } else if (name === 'midnight') {
+    root.setProperty('--p', '#141e30');
+    root.setProperty('--s', '#243b55');
+    root.setProperty('--bg', 'linear-gradient(135deg,#000000,#141e30,#243b55)');
+    root.setProperty('--card-bg', 'rgba(10,18,32,0.97)');
+    root.setProperty('--text-color', '#e3f2fd');
+  } else if (name === 'dark') {
+    root.setProperty('--p', '#ff8aa3');
+    root.setProperty('--s', '#6fb3b8');
+    root.setProperty('--bg', 'linear-gradient(135deg,#0f1115,#15181c)');
+    root.setProperty('--card-bg', '#101214');
+    root.setProperty('--text-color', '#ddd');
+  }
+}
+</script>
+</body>
+</html>
