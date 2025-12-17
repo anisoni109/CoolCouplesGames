@@ -724,8 +724,14 @@ let state = {
   currentTurn: null,
   lastTurn: null,
   rematchCount: 0,
+  clientId: null, // unique per device
 };
-let rematchRequested = false;
+
+// assign a stable client id for this browser session
+function generateClientId() {
+  return Math.random().toString(36).substr(2,9) + '_' + Date.now().toString(36);
+}
+state.clientId = generateClientId();
 
 // --- UTILS ---
 function show(id) {
@@ -966,82 +972,97 @@ function updateRoomStatus(isReady = false) {
 
 function createRoom() {
   state.role = "p1";
-  state.code = Math.random().toString(36).substring(2,6).toUpperCase();
-  document.getElementById('roomInfoDisplay').classList.remove('hidden');
-  document.getElementById('roomCodeDisplay').innerHTML = `Code: <b>${state.code}</b>`;
-  document.querySelector('#setup .primary').classList.add('hidden');
-  updateRoomStatus(false);
-
+  state.code = Math.random().toString(36).substring(2, 6).toUpperCase();
   const gameRef = db.ref(`games/${state.code}`);
-  // Ensure p1 entry is removed if this client disconnects
-  gameRef.child('p1').onDisconnect().remove();
+
+  // Prepare initial game object
   gameRef.set({
     settings: {
       digits: state.digits,
       repeat: state.repeat,
       timeout: state.timeoutEnabled,
-      duration: state.timeoutDuration
+      duration: state.timeoutDuration,
     },
-    turn: "p1"
-  });
-  gameRef.child('p1').set({ name: state.name });
-  
-  db.ref(`games/${state.code}/p2`).on("value", snap => {
-    if(snap.exists()) {
-      state.opponentName = snap.val().name || "Player 2";
-      updateRoomStatus(true);
-      document.querySelector('#setup .primary').classList.remove('hidden');
-      show('secret');
-      document.getElementById('secretTitle').innerText = "Hey Partner! 👋";
-      document.getElementById('secretSub').innerText = `${state.opponentName} has joined.`;
-      waitForSecrets();
-      db.ref(`games/${state.code}/p2`).off(); 
-    }
-  });
+    turn: "p1",
+  })
+    .then(() => {
+      const p1Ref = gameRef.child('p1');
+      // Write p1 with clientId so we can track which client owns it
+      return p1Ref.set({ name: state.name, clientId: state.clientId }).then(() => {
+        // ensure this entry is removed if this client disconnects
+        p1Ref.onDisconnect().remove();
+        document.getElementById('roomInfoDisplay').classList.remove('hidden');
+        document.getElementById('roomCodeDisplay').innerHTML = `Code: <b>${state.code}</b>`;
+        updateRoomStatus(false);
+      });
+    })
+    .catch(err => {
+      console.error("Firebase Create Room Error:", err);
+      showToast("Failed to create room. Please try again.");
+    });
 }
 
 function joinRoom() {
-    state.role = "p2";
-    // We trim and uppercase to prevent common typing errors
-    const inputCode = document.getElementById("joinCodeInput").value.trim().toUpperCase();
-    state.code = inputCode;
+  state.role = "p2";
+  state.code = document.getElementById("joinCodeInput").value.trim().toUpperCase();
+  if (!state.code) return showToast("Enter Code!");
 
-    if (!inputCode) {
-        showErrorModal();
+  const gameRef = db.ref(`games/${state.code}`);
+  // Use a transaction to atomically claim the p2 slot to avoid race conditions
+  const p2Ref = db.ref(`games/${state.code}/p2`);
+
+  // First check game exists (gives faster feedback if invalid code)
+  gameRef.once('value').then(snap => {
+    if (!snap.exists()) return showToast('Invalid Code');
+
+    // Attempt to atomically claim p2
+    p2Ref.transaction(current => {
+      if (current === null) {
+        return { name: state.name, clientId: state.clientId };
+      }
+      // If already occupied, abort the transaction
+      return;
+    }, (error, committed, snapshot) => {
+      if (error) {
+        console.error('Transaction failed:', error);
+        showToast('Failed to join room. Try again.');
         return;
-    }
+      }
+      if (!committed) {
+        // someone already took the slot
+        showToast('Room is already full or someone joined just now.');
+        return;
+      }
 
-    db.ref(`games/${state.code}`).once("value").then(snap => {
-        if (!snap.exists()) {
-            showErrorModal();
-            return;
-        }
+      // Successfully claimed p2 — set onDisconnect to remove our claim
+      try {
+        p2Ref.onDisconnect().remove();
+      } catch (e) {
+        console.warn('onDisconnect registration failed', e);
+      }
 
-        const g = snap.val();
-        const s = g.settings;
-        
-        // Sync settings from the room creator
-        state.digits = s.digits;
-        state.repeat = s.repeat;
-        state.timeoutEnabled = s.timeout;
-        state.timeoutDuration = s.duration;
-        state.opponentName = g.p1.name;
-
-        // Mark presence in the database
-        db.ref(`games/${state.code}/p2`).set({
-            name: state.name,
-            present: true
-        });
-        
-        // Setup disconnect listener
-        db.ref(`games/${state.code}/p2/present`).onDisconnect().remove();
+      // Read settings and proceed
+      gameRef.once('value').then(gameSnap => {
+        const settings = gameSnap.val().settings || {};
+        state.digits = settings.digits || state.digits;
+        state.repeat = settings.repeat || state.repeat;
+        state.timeoutEnabled = settings.timeout || false;
+        state.timeoutDuration = settings.duration || 0;
+        state.opponentName = gameSnap.val().p1?.name || 'Player 1';
 
         show('secret');
+        document.getElementById('secretTitle').innerText = 'Set Secret';
+        document.getElementById('secretSub').innerText = `Connected to ${state.opponentName}`;
         waitForSecrets();
-    }).catch(err => {
-        console.error("Firebase Join Error:", err);
-        showErrorModal();
+      }).catch(err => {
+        console.error('Error reading game settings after join:', err);
+        showToast('Joined but failed to read game settings.');
+      });
     });
+  }).catch(err => {
+    console.error('Firebase Join Error (existence check):', err);
+    showToast('Error connecting to room. Check your network.');
+  });
 }
 
 // UI Helper Functions for Error Modal
@@ -1481,7 +1502,7 @@ function listenMultiplayerGame() {
     if (state.timeoutEnabled && g.turnStart) {
         const turnStartTimestamp = g.turnStart;
         if (state.turnStartTimestamp !== turnStartTimestamp) {
-          // save server start for debug UI
+          // save server start for debug
           state.debug.serverTurnStart = turnStartTimestamp;
           updateDebugDisplay();
           if (myTurn) startTurnTimer(turnStartTimestamp);
