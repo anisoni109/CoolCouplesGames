@@ -1020,6 +1020,28 @@ function createRoom() {
         document.getElementById('roomInfoDisplay').classList.remove('hidden');
         document.getElementById('roomCodeDisplay').innerHTML = `Code: <b>${state.code}</b>`;
         updateRoomStatus(false);
+
+        // Watch for p2 to join so host can proceed immediately to secret setup
+        try {
+          const p2Watcher = gameRef.child('p2');
+          p2Watcher.on('value', snapP2 => {
+            const p2 = snapP2.val();
+            if (p2) {
+              state.opponentName = p2.name || 'Player 2';
+              updateRoomStatus(true);
+              // If host not already in game or secret step, move to secret screen and wait
+              if (!state.gameActive && document.getElementById('secret').classList.contains('hidden')) {
+                show('secret');
+                document.getElementById('secretTitle').innerText = 'Set Secret';
+                document.getElementById('secretSub').innerText = `Connected to ${state.opponentName}`;
+                waitForSecrets();
+              }
+            } else {
+              // partner left while in lobby
+              updateRoomStatus(false);
+            }
+          });
+        } catch(e) { console.warn('Failed to attach p2 watcher', e); }
       });
     })
     .catch(err => {
